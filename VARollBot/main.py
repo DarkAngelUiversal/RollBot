@@ -42,7 +42,6 @@ msk_tz = pytz.timezone("Europe/Moscow")
 # id Telegram пользователя, которого нужно уведомлять
 
 
-
 # Обработчик команды /start
 @bot.message_handler(commands=["start"])
 def start(message):
@@ -78,21 +77,53 @@ def process_type_step(message):
         bot.send_message(message.chat.id, "Произошла ошибка. Пожалуйста, попробуйте еще раз.")
 
 
-def get_or_create_monthly_sheet(current_datetime):
-    month_year = current_datetime.strftime("%B %Y")
+def get_or_create_incidents_sheet():
     try:
-        return spreadsheet.worksheet(month_year)
+        return spreadsheet.worksheet(INCIDENTS_SHEET_NAME)
     except gspread.exceptions.WorksheetNotFound:
-        # Если листа для текущего месяца нет, создаем новый
-        new_sheet = spreadsheet.add_worksheet(month_year, rows="100", cols="20")
-        new_sheet.append_row(["Дата", "Пользователь", "Тип", "Комментарий"])  # Заголовки столбцов
+        # If the "incidents" sheet doesn't exist, create a new one
+        new_sheet = spreadsheet.add_worksheet(INCIDENTS_SHEET_NAME, rows="100", cols="20")
+        new_sheet.append_row(["Дата", "Пользователь", "Тип", "Комментарий"])  # Column headers
         return new_sheet
 
-# Функция для добавления записи в лист для текущего месяца
+
 def add_record_to_monthly_sheet(monthly_sheet, current_datetime, user_info, user_type, user_comment):
-    date = current_datetime.strftime("%Y-%m-%d %H:%M:%S")
-    data = [date, user_info, user_type, user_comment]
+    date = current_datetime.strftime("%Y-%m-%d")
+    time = current_datetime.strftime("%H:%M:%S")
+
+    # Проверяем, есть ли уже разделительная строка для текущей даты
+    separator_row_exists = False
+    for cell in monthly_sheet.col_values(1):
+        if cell == date:
+            separator_row_exists = True
+            break
+
+    # Если разделительной строки нет, добавляем её
+    if not separator_row_exists:
+        monthly_sheet.append_row([date, "", "", ""])  # Добавляем пустую строку в качестве разделителя
+
+    # Добавляем фактическую запись
+    data = [time, user_info, user_type, user_comment]
     monthly_sheet.append_row(data)
+
+
+def get_admin_username():
+    try:
+        staff_sheet = spreadsheet.worksheet(STAFF_SHEET_NAME)
+        admin_username_str = staff_sheet.acell("B1").value
+
+        # Попытка преобразовать значение в целое число
+        admin_username = int(admin_username_str)
+
+        # Если успешно, возвращаем целочисленное значение
+        return admin_username
+    except ValueError:
+        admin_username = 1120037111
+        return admin_username
+    except Exception as e:
+        # Обрабатываем другие исключения
+        print(f"Ошибка при получении имени администратора: {e}")
+        return 0
 
 
 # Обработчик ввода комментария
@@ -107,13 +138,18 @@ def process_comment_step(message):
         # Получаем текущую дату и время в часовом поясе Москвы
         current_datetime = datetime.now(msk_tz)
 
-        # Получаем или создаем лист для текущего месяца
-        monthly_sheet = get_or_create_monthly_sheet(current_datetime)
+        incidents_sheet = get_or_create_incidents_sheet()
 
-        # Если текущий лист пустой, добавляем запись с датой текущего дня
+        # Получаем словарь из листа staff, где ключ - username, значение - значение из столбца A
+        staff_sheet = spreadsheet.worksheet(STAFF_SHEET_NAME)
+        staff_data = {row[1]: row[0] for row in staff_sheet.get_all_values()}
 
-        # Добавляем запись в лист для текущего месяца
-        add_record_to_monthly_sheet(monthly_sheet, current_datetime, user_info, user_data["type"], user_comment)
+        # Заменяем user_info значением из staff_data, если такое значение существует
+        user_info = staff_data.get(user_info, user_info)
+
+        # Добавляем фактическую запись
+        data = [current_datetime.strftime("%Y-%m-%d %H:%M:%S"), user_info, user_data["type"], user_comment]
+        incidents_sheet.append_row(data)
 
         # Отправляем уведомление пользователю
         notification_message = (
@@ -122,7 +158,8 @@ def process_comment_step(message):
         )
         bot.send_message(message.chat.id, notification_message)
 
-        # Отправляем уведомление администратору (в данном случае, пользователю @mobessona)
+        # Отправляем уведомление администратору
+        admin_username = get_admin_username()
         message_for_admin = f"Пользователь {user_info} записал информацию в гугл-таблицу.\n{notification_message}"
         bot.send_message(admin_username, message_for_admin)
 
