@@ -19,36 +19,30 @@ from telebot import types
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
- 
 # Замените на свой токен бота и данные для доступа к гугл-таблице
 
+INCIDENTS_SHEET_NAME = "incidents"
+STAFF_SHEET_NAME = "staff"
 
-# Инициализация бота и доступа к гугл-таблице
+
+ADMINS_IDS = ***REMOVED***
 bot = telebot.TeleBot(TOKEN)
 creds = ServiceAccountCredentials.from_json_keyfile_name("exeljs.json")
 client = gspread.authorize(creds)
 spreadsheet = client.open_by_key(SPREADSHEET_KEY)
-worksheet = spreadsheet.get_worksheet(0)  # Предполагается, что данные будут записываться в первый лист таблицы
-
+worksheet = spreadsheet.get_worksheet(0)
 # Список доступных типов
-available_buttons = ["опоздание//задержка на работе//отсутствие", "Прервался звонок"]
-
-# Словарь для временного хранения данных пользователя
+available_buttons = ["опоздание//задержка на работе//отсутствие", "Прервался звонок", "Cторонний функционал"]
 user_data = {}
-
-
+current_date = None
 msk_tz = pytz.timezone("Europe/Moscow")
 
-# id Telegram пользователя, которого нужно уведомлять
 
-
-# Обработчик команды /start
 @bot.message_handler(commands=["start"])
 def start(message):
     bot.send_message(message.chat.id, "Привет! Я бот для фиксации информации в гугл-таблицу. " "Отправь мне /record для начала записи.")
 
 
-# Обработчик команды /record
 @bot.message_handler(commands=["record"])
 def record(message):
     markup = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True)
@@ -81,9 +75,9 @@ def get_or_create_incidents_sheet():
     try:
         return spreadsheet.worksheet(INCIDENTS_SHEET_NAME)
     except gspread.exceptions.WorksheetNotFound:
-        # If the "incidents" sheet doesn't exist, create a new one
-        new_sheet = spreadsheet.add_worksheet(INCIDENTS_SHEET_NAME, rows="100", cols="20")
-        new_sheet.append_row(["Дата", "Пользователь", "Тип", "Комментарий"])  # Column headers
+        # Если лист "incidents" не существует, создаем новый
+        new_sheet = spreadsheet.add_worksheet(INCIDENTS_SHEET_NAME, rows="100", cols="4")
+        new_sheet.append_row(["Дата", "Пользователь", "Тип", "Комментарий"])  # Заголовки столбцов
         return new_sheet
 
 
@@ -107,23 +101,18 @@ def add_record_to_monthly_sheet(monthly_sheet, current_datetime, user_info, user
     monthly_sheet.append_row(data)
 
 
-def get_admin_username():
+def get_admins_ids() -> list[int]:
     try:
         staff_sheet = spreadsheet.worksheet(STAFF_SHEET_NAME)
-        admin_username_str = staff_sheet.acell("B1").value
-
-        # Попытка преобразовать значение в целое число
-        admin_username = int(admin_username_str)
+        admin_username_str = int(staff_sheet.acell("B1").value)
+        seckond_admin_username_str = int(staff_sheet.acell("B2").value)
 
         # Если успешно, возвращаем целочисленное значение
-        return admin_username
-    except ValueError:
-        admin_username = 1120037111
-        return admin_username
+        return [admin_username_str, seckond_admin_username_str]
     except Exception as e:
         # Обрабатываем другие исключения
         print(f"Ошибка при получении имени администратора: {e}")
-        return 0
+        return ADMINS_IDS
 
 
 # Обработчик ввода комментария
@@ -135,21 +124,53 @@ def process_comment_step(message):
         # Получаем информацию о пользователе
         user_info = f"@{message.from_user.username}"
 
+        # Проверяем и обнуляем дату текущего дня при необходимости
+        check_and_reset_current_date()
+
         # Получаем текущую дату и время в часовом поясе Москвы
         current_datetime = datetime.now(msk_tz)
 
-        incidents_sheet = get_or_create_incidents_sheet()
-
-        # Получаем словарь из листа staff, где ключ - username, значение - значение из столбца A
+        # Получаем лист сотрудников
         staff_sheet = spreadsheet.worksheet(STAFF_SHEET_NAME)
-        staff_data = {row[1]: row[0] for row in staff_sheet.get_all_values()}
 
-        # Заменяем user_info значением из staff_data, если такое значение существует
-        user_info = staff_data.get(user_info, user_info)
+        cell = None
+        for row in staff_sheet.findall(user_info, in_column=2):
+            if row:
+                cell = row
+                break
 
-        # Добавляем фактическую запись
-        data = [current_datetime.strftime("%Y-%m-%d %H:%M:%S"), user_info, user_data["type"], user_comment]
-        incidents_sheet.append_row(data)
+        if cell:
+            # Если пользователь найден, заменяем user_info значением из столбца A
+            user_info = staff_sheet.cell(cell.row, 1).value
+
+        # Добавьте следующие строки для получения или создания листа инцидентов
+        incident_sheet = get_or_create_incidents_sheet()
+        incident_data = incident_sheet.get_all_values()
+
+        # Получаем последнюю дату из таблицы, если есть данные
+        last_row_date = incident_data[-1][0].split()[0] if incident_data else None
+
+        if last_row_date == current_date:
+            # Если последняя дата совпадает с датой инцидента, добавляем новую строку с данными инцидента.
+            incident_sheet.append_row([current_datetime.strftime("%Y-%m-%d %H:%M:%S"), user_info, user_data["type"], user_comment])
+        else:
+            # Если таблица пуста или последняя дата не совпадает с датой инцидента,
+            # добавляем новую строку с текущей датой и объединяем четыре ячейки.
+            incident_sheet.append_row([current_date])
+
+            # Получаем номер добавленной строки
+            last_row_number = len(incident_data) + 1
+
+            # Объединяем четыре ячейки для строки с текущей датой.
+            cell_range_date = f"A{last_row_number}:D{last_row_number}"
+            incident_sheet.merge_cells(cell_range_date, merge_type="MERGE_ALL")
+
+            # Обновляем форматирование для строки с текущей датой (центрирование).
+            cell_format_date = {"horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"}
+            incident_sheet.format(cell_range_date, cell_format_date)
+
+            # Добавляем новую строку с данными инцидента.
+            incident_sheet.append_row([current_datetime.strftime("%Y-%m-%d %H:%M:%S"), user_info, user_data["type"], user_comment])
 
         # Отправляем уведомление пользователю
         notification_message = (
@@ -159,9 +180,10 @@ def process_comment_step(message):
         bot.send_message(message.chat.id, notification_message)
 
         # Отправляем уведомление администратору
-        admin_username = get_admin_username()
+        admins_ids = get_admins_ids()
         message_for_admin = f"Пользователь {user_info} записал информацию в гугл-таблицу.\n{notification_message}"
-        bot.send_message(admin_username, message_for_admin)
+        for admin_id in admins_ids:
+            bot.send_message(admin_id, message_for_admin)
 
     except gspread.exceptions.APIError as e:
         print(f"Google Sheets API Error: {e}")
@@ -174,7 +196,14 @@ def process_comment_step(message):
         bot.send_message(message.chat.id, error_message)
 
 
+# Функция для проверки и обнуления даты текущего дня при необходимости
+def check_and_reset_current_date():
+    global current_date
+    today = datetime.now(msk_tz).strftime("%Y-%m-%d")
+    if current_date != today:
+        current_date = today
+
+
 # Запуск бота
 if __name__ == "__main__":
     bot.polling(none_stop=True)
-bot.infinity_polling()
