@@ -20,13 +20,10 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 
-
-
-
 [tool.black]
 line-length = 140
 
-# [tool.ruff]
+[tool.ruff]
 # select = [
 #   # pyflakes
 #   "F",
@@ -93,7 +90,7 @@ line-length = 140
 # ]
 
 # #Same as Black.
-# line-length = 140
+line-length = 140
 
 # # Allow unused variables when underscore-prefixed.
 # dummy-variable-rgx = "^(+|(+[a-zA-Z0-9]*[a-zA-Z0-9]+?))$"

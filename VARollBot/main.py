@@ -6,32 +6,19 @@ import telebot
 from oauth2client.service_account import ServiceAccountCredentials
 from telebot import types
 
-# utc_now = datetime.utcnow()
-# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-# Read about loggers, ask gpt, or me to provide u some links
-
-# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-# Замените на свой токен бота и данные для доступа к гугл-таблице
-
+SPREADSHEET_KEY = ***REMOVED***
 INCIDENTS_SHEET_NAME = "incidents"
 STAFF_SHEET_NAME = "staff"
-
-
 ADMINS_IDS = ***REMOVED***
+
+
 bot = telebot.TeleBot(TOKEN)
 creds = ServiceAccountCredentials.from_json_keyfile_name("exeljs.json")
 client = gspread.authorize(creds)
 spreadsheet = client.open_by_key(SPREADSHEET_KEY)
 worksheet = spreadsheet.get_worksheet(0)
-# Список доступных типов
+
+
 available_buttons = ["опоздание//задержка на работе//отсутствие", "Прервался звонок", "Cторонний функционал"]
 user_data = {}
 current_date = None
@@ -52,7 +39,6 @@ def record(message):
     bot.register_next_step_handler(message, process_type_step)
 
 
-# Обработчик выбора типа
 def process_type_step(message):
     try:
         # Проверяем, что тип входит в список доступных
@@ -77,28 +63,8 @@ def get_or_create_incidents_sheet():
     except gspread.exceptions.WorksheetNotFound:
         # Если лист "incidents" не существует, создаем новый
         new_sheet = spreadsheet.add_worksheet(INCIDENTS_SHEET_NAME, rows="100", cols="4")
-        new_sheet.append_row(["Дата", "Пользователь", "Тип", "Комментарий"])  # Заголовки столбцов
+        new_sheet.append_row(["Дата", "Пользователь", "Тип", "Комментарий"])
         return new_sheet
-
-
-def add_record_to_monthly_sheet(monthly_sheet, current_datetime, user_info, user_type, user_comment):
-    date = current_datetime.strftime("%Y-%m-%d")
-    time = current_datetime.strftime("%H:%M:%S")
-
-    # Проверяем, есть ли уже разделительная строка для текущей даты
-    separator_row_exists = False
-    for cell in monthly_sheet.col_values(1):
-        if cell == date:
-            separator_row_exists = True
-            break
-
-    # Если разделительной строки нет, добавляем её
-    if not separator_row_exists:
-        monthly_sheet.append_row([date, "", "", ""])  # Добавляем пустую строку в качестве разделителя
-
-    # Добавляем фактическую запись
-    data = [time, user_info, user_type, user_comment]
-    monthly_sheet.append_row(data)
 
 
 def get_admins_ids() -> list[int]:
@@ -107,10 +73,8 @@ def get_admins_ids() -> list[int]:
         admin_username_str = int(staff_sheet.acell("B1").value)
         seckond_admin_username_str = int(staff_sheet.acell("B2").value)
 
-        # Если успешно, возвращаем целочисленное значение
         return [admin_username_str, seckond_admin_username_str]
     except Exception as e:
-        # Обрабатываем другие исключения
         print(f"Ошибка при получении имени администратора: {e}")
         return ADMINS_IDS
 
@@ -185,18 +149,12 @@ def process_comment_step(message):
         for admin_id in admins_ids:
             bot.send_message(admin_id, message_for_admin)
 
-    except gspread.exceptions.APIError as e:
-        print(f"Google Sheets API Error: {e}")
-        error_message = "Произошла ошибка при записи данных в гугл-таблицу. Пожалуйста, попробуйте еще раз или обратитесь к администратору."
-        bot.send_message(message.chat.id, error_message)
-
     except Exception as e:
         print(f"Error: {e}")
         error_message = "Произошла ошибка. Пожалуйста, попробуйте еще раз или обратитесь к администратору."
         bot.send_message(message.chat.id, error_message)
 
 
-# Функция для проверки и обнуления даты текущего дня при необходимости
 def check_and_reset_current_date():
     global current_date
     today = datetime.now(msk_tz).strftime("%Y-%m-%d")
@@ -204,6 +162,5 @@ def check_and_reset_current_date():
         current_date = today
 
 
-# Запуск бота
 if __name__ == "__main__":
     bot.polling(none_stop=True)
