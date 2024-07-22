@@ -1,0 +1,1 @@
+The bot is designed for internal use by a team, aimed at logging incidents by employees and documenting them in Google Docs for further analysis by management. Additionally, the bot sends a notification to the administrator about each recorded incident
